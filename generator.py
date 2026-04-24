@@ -1,69 +1,37 @@
 import csv
 import random
-import os
 from datetime import datetime
 
-# IP-uri normale
-normal_ips = [
-    "192.168.1.1",
-    "192.168.1.2"
-]
+ip_good = ["192.168.1.1", "192.168.1.2"]
+ip_bad = "185.220.101.1"
 
-# IP atacator
-attacker_ip = "185.220.101.1"
-
-actions = ["login", "download"]
-
-# =========================
-# SCRIERE LOG
-# =========================
-def write_log(ip, action, status):
-    file_exists = os.path.isfile("logs.csv")
-
-    with open("logs.csv", "a", newline="") as file:
-        writer = csv.writer(file)
-
-        # header dacă fișierul e nou
-        if not file_exists:
-            writer.writerow(["timestamp", "ip", "action", "status"])
-
+def write(ip, action, status):
+    with open("logs.csv", "a", newline="") as f:
+        writer = csv.writer(f)
         writer.writerow([datetime.now(), ip, action, status])
 
+def normal():
+    for _ in range(20):
+        write(random.choice(ip_good), "visit", "success")
 
-# =========================
-# TRAFIC NORMAL
-# =========================
-def normal_activity():
+def brute():
+    for _ in range(20):
+        write(ip_bad, "login", "failed")
+
+def slow():
     for _ in range(10):
-        ip = random.choice(normal_ips)
-        action = random.choice(actions)
-        status = "success"
-        write_log(ip, action, status)
+        write(ip_bad, "login", "failed")
+        write(ip_bad, "visit", "success")
 
+def weird():
+    for _ in range(10):
+        write(ip_bad, "download", "success")
+        write(ip_bad, "login", "failed")
 
-# =========================
-# ATAC BRUTE FORCE
-# =========================
-def brute_force_attack():
-    for _ in range(20):  # mai multe pentru claritate
-        write_log(attacker_ip, "login", "failed")
+print("1 normal | 2 brute | 3 slow | 4 weird")
+c = input()
 
-
-# =========================
-# MENIU
-# =========================
-print("1 - Trafic normal")
-print("2 - Atac brute force")
-
-choice = input("Alege scenariu: ")
-
-if choice == "1":
-    normal_activity()
-    print("Trafic normal generat")
-
-elif choice == "2":
-    brute_force_attack()
-    print("Atac generat")
-
-else:
-    print("Optiune invalida")
+if c == "1": normal()
+elif c == "2": brute()
+elif c == "3": slow()
+elif c == "4": weird()

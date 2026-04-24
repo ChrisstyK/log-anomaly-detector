@@ -1,90 +1,85 @@
+import streamlit as st
 import pandas as pd
 from sklearn.ensemble import IsolationForest
-import matplotlib.pyplot as plt
+from sklearn.neighbors import LocalOutlierFactor
+import time
 
-# =========================
-# 1. CITIRE DATE
-# =========================
-df = pd.read_csv("logs.csv")
+st.title("SIEM Inteligent - Monitorizare in timp real")
 
-print("=== DATE INITIALE ===")
-print(df)
+refresh_interval = st.slider("Interval refresh (secunde)", 1, 10, 3)
 
+placeholder = st.empty()
 
-# =========================
-# 2. PREPROCESARE + FEATURE ENGINEERING
-# =========================
+while True:
+    try:
+        df = pd.read_csv("logs.csv")
 
-# encoding
-df["status"] = df["status"].map({"success": 0, "failed": 1})
-df["action"] = df["action"].map({"login": 0, "download": 1})
+        # =========================
+        # PREPROCESARE
+        # =========================
+        df["status"] = df["status"].map({"success": 0, "failed": 1})
+        df["action"] = df["action"].map({
+            "login": 0,
+            "download": 1,
+            "visit": 2
+        })
 
-# timestamp
-df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-# feature: număr evenimente per IP
-df["ip_count"] = df.groupby("ip")["ip"].transform("count")
+        # =========================
+        # FEATURE ENGINEERING
+        # =========================
+        df["ip_count"] = df.groupby("ip")["ip"].transform("count")
+        df["ip_failed"] = df.groupby("ip")["status"].transform("sum")
 
-# feature: număr failed per IP
-df["ip_failed"] = df.groupby("ip")["status"].transform("sum")
+        # =========================
+        # ML
+        # =========================
+        ml_data = df[["action", "status", "ip_count", "ip_failed"]]
 
-print("\n=== FEATURE ENGINEERING ===")
-print(df[["ip", "action", "status", "ip_count", "ip_failed"]])
+        iso_model = IsolationForest(contamination=0.2, random_state=42)
+        df["iso"] = iso_model.fit_predict(ml_data)
+        df["iso"] = df["iso"].map({1: 0, -1: 1})
 
+        lof_model = LocalOutlierFactor(n_neighbors=5, contamination=0.2)
+        lof_preds = lof_model.fit_predict(ml_data)
+        df["lof"] = [0 if x == 1 else 1 for x in lof_preds]
 
-# =========================
-# 3. MODEL ML
-# =========================
+        # =========================
+        # RULES
+        # =========================
+        brute_force = df[df["ip_failed"] > 5]
 
-# alegem doar coloane numerice pentru ML
-ml_data = df[["action", "status", "ip_count", "ip_failed"]]
+        # trafic mare (posibil DoS)
+        high_traffic = df[df["ip_count"] > 15]
 
-model = IsolationForest(contamination=0.2, random_state=42)
+        # =========================
+        # UI
+        # =========================
+        with placeholder.container():
 
-df["anomaly"] = model.fit_predict(ml_data)
+            st.subheader("Date curente")
+            st.write(df.tail(10))
 
-# transformare
-df["anomaly"] = df["anomaly"].map({1: 0, -1: 1})
+            st.subheader("Detectie Brute Force")
+            st.write(brute_force[["ip", "ip_failed"]].drop_duplicates())
 
-print("\n=== REZULTAT ML ===")
-print(df[["ip", "action", "status", "ip_count", "ip_failed", "anomaly"]])
+            if not brute_force.empty:
+                st.error("ATAC BRUTE FORCE DETECTAT")
 
+            st.subheader("Trafic suspect (volum mare)")
+            st.write(high_traffic[["ip", "ip_count"]].drop_duplicates())
 
-# =========================
-# 4. DETECTIE BRUTE FORCE (RULE-BASED)
-# =========================
+            if not high_traffic.empty:
+                st.warning("Trafic anormal detectat")
 
-# prag: mai mult de 5 login failed
-brute_force = df[df["ip_failed"] > 5]
+            st.subheader("Anomalii ML (Isolation Forest)")
+            st.write(df[df["iso"] == 1][["ip", "action", "status"]])
 
-print("\n=== DETECTIE BRUTE FORCE ===")
-print(brute_force[["ip", "ip_failed"]].drop_duplicates())
+            st.subheader("Anomalii ML (LOF)")
+            st.write(df[df["lof"] == 1][["ip", "action", "status"]])
 
+    except Exception as e:
+        st.error(f"Eroare: {e}")
 
-# =========================
-# 5. ANOMALII ML
-# =========================
-
-anomalies = df[df["anomaly"] == 1]
-
-print("\n=== ANOMALII ML ===")
-print(anomalies[["ip", "action", "status"]])
-
-
-# =========================
-# 6. GRAFIC
-# =========================
-
-plt.figure()
-
-normal = df[df["anomaly"] == 0]
-plt.scatter(normal.index, normal["status"], label="Normal")
-
-plt.scatter(anomalies.index, anomalies["status"], label="Anomalie")
-
-plt.title("Detectie Anomalii + Atacuri")
-plt.xlabel("Index")
-plt.ylabel("Status (0=OK, 1=Failed)")
-plt.legend()
-
-plt.show()
+    time.sleep(refresh_interval)
